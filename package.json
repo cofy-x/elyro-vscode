@@ -1,0 +1,159 @@
+{
+  "name": "elyro",
+  "displayName": "Elyro",
+  "description": "Run and inspect Elyro Linux Workspaces from VS Code and Cursor.",
+  "version": "0.1.0",
+  "publisher": "cofy-x",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/cofy-x/elyro-vscode#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cofy-x/elyro-vscode.git"
+  },
+  "bugs": {
+    "url": "https://github.com/cofy-x/elyro-vscode/issues"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "elyro",
+    "linux",
+    "workspace",
+    "development environment",
+    "cursor"
+  ],
+  "icon": "media/icon.png",
+  "banner": {
+    "color": "#171A2B",
+    "theme": "dark"
+  },
+  "engines": {
+    "node": ">=22",
+    "vscode": "^1.99.0"
+  },
+  "extensionKind": [
+    "ui"
+  ],
+  "main": "./dist/extension.js",
+  "packageManager": "npm@11.13.0",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Elyro commands execute against the current project and require Workspace Trust."
+    }
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "elyro.openMenu",
+        "title": "Open Workspace Menu",
+        "category": "Elyro",
+        "icon": "$(terminal-linux)"
+      },
+      {
+        "command": "elyro.showStatus",
+        "title": "Show Workspace Status",
+        "category": "Elyro",
+        "icon": "$(pulse)"
+      },
+      {
+        "command": "elyro.start",
+        "title": "Start Workspace",
+        "category": "Elyro",
+        "icon": "$(play)"
+      },
+      {
+        "command": "elyro.startAndOpen",
+        "title": "Start and Open Workspace",
+        "category": "Elyro",
+        "icon": "$(remote-explorer)"
+      },
+      {
+        "command": "elyro.open",
+        "title": "Open Workspace",
+        "category": "Elyro",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "elyro.openShell",
+        "title": "Open Workspace Shell",
+        "category": "Elyro",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "elyro.runDoctor",
+        "title": "Run Doctor",
+        "category": "Elyro",
+        "icon": "$(stethoscope)"
+      },
+      {
+        "command": "elyro.stop",
+        "title": "Stop Workspace",
+        "category": "Elyro",
+        "icon": "$(stop-circle)"
+      },
+      {
+        "command": "elyro.refresh",
+        "title": "Refresh Workspace Status",
+        "category": "Elyro",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "elyro.showOutput",
+        "title": "Show Output",
+        "category": "Elyro",
+        "icon": "$(output)"
+      }
+    ],
+    "configuration": {
+      "title": "Elyro",
+      "properties": {
+        "elyro.executablePath": {
+          "type": "string",
+          "default": "elyro",
+          "scope": "machine",
+          "markdownDescription": "Path to the host-installed `elyro` executable."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm run test:unit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "npm run build:test && node --test 'out-test/unit/**/*.test.js'",
+    "build:test": "tsc -p tsconfig.test.json",
+    "test:integration": "npm run build && npm run build:test && node scripts/run-integration-tests.mjs",
+    "package": "npm run build && node scripts/package.mjs",
+    "package:verify": "node scripts/verify-package.mjs",
+    "vscode:prepublish": "npm run build"
+  },
+  "overrides": {
+    "diff": "8.0.3",
+    "serialize-javascript": "7.0.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/mocha": "10.0.10",
+    "@types/node": "22.20.1",
+    "@types/vscode": "1.99.1",
+    "@types/yauzl": "3.4.0",
+    "@vscode/test-electron": "3.0.0",
+    "@vscode/vsce": "3.9.2",
+    "esbuild": "0.28.1",
+    "eslint": "10.7.0",
+    "mocha": "11.7.6",
+    "prettier": "3.9.6",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.65.0",
+    "yauzl": "3.4.0"
+  }
+}

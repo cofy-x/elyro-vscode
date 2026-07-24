@@ -1,0 +1,15 @@
+.github/
+.gitignore
+.prettierignore
+.vscode/
+.x/
+AGENTS.md
+artifacts/
+docs/
+node_modules/
+out-test/
+scripts/
+src/
+dist/*.map
+*.config.mjs
+tsconfig*.json
