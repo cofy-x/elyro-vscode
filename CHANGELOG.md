@@ -3,6 +3,10 @@
 ## 0.1.2
 
 - Close progress notifications as soon as Doctor and Workspace Details finish loading, without waiting for their result panels to be dismissed.
+- Treat user cancellation as a quiet outcome instead of an error.
+- Keep project rows focused on expansion, collapse inactive projects in multi-root windows, and retain quick actions in their native sidebar rows.
+- Start busy feedback only after lifecycle confirmation.
+- Summarize Doctor results with pass, advisory, and failure counts, then refresh the project state automatically.
 
 ## 0.1.1
 

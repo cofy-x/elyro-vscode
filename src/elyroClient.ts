@@ -26,6 +26,13 @@ export class ElyroCommandError extends Error {
   }
 }
 
+export class ElyroCancellationError extends ElyroCommandError {
+  constructor(result?: CommandResult) {
+    super("Elyro command was cancelled.", result);
+    this.name = "ElyroCancellationError";
+  }
+}
+
 export class ElyroClient {
   constructor(
     readonly executable: string,
@@ -80,7 +87,7 @@ export class ElyroClient {
         logResult(result, this.log);
 
         if (cancellation?.isCancellationRequested) {
-          reject(new ElyroCommandError("Elyro command was cancelled.", result));
+          reject(new ElyroCancellationError(result));
           return;
         }
         resolve(result);

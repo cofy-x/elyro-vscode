@@ -206,6 +206,16 @@ export function shouldShowGlobalSetup(
   );
 }
 
+export function shouldExpandProject(
+  snapshot: ProjectSnapshot,
+  projectCount: number,
+  selected: boolean,
+): boolean {
+  return (
+    projectCount === 1 || selected || snapshot.workspace?.status === "running"
+  );
+}
+
 function action(
   command: string,
   label: string,

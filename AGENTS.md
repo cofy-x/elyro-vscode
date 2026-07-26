@@ -30,3 +30,4 @@
 - Update user documentation and the validation matrix when behavior or release requirements change.
 - Do not commit generated packages, credentials, Personal Access Tokens, publisher secrets, or machine-specific state.
 - Do not commit, push, tag, publish a VSIX, or change Marketplace state unless the user explicitly requests that operation.
+- Format commits with a Conventional Commits prefix such as `feat:`, `fix:`, `docs:`, `test:`, `refactor:`, or `chore:`. After the subject and a blank line, use a Markdown-style list to summarize material changes when the commit contains multiple changes.

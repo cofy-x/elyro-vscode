@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
+  ElyroCancellationError,
   ElyroClient,
   ElyroCommandError,
   type CancellationLike,
@@ -68,7 +69,7 @@ test("cancels a running command", async (context) => {
   await assert.rejects(
     pending,
     (error: unknown) =>
-      error instanceof ElyroCommandError &&
+      error instanceof ElyroCancellationError &&
       error.message === "Elyro command was cancelled.",
   );
 });

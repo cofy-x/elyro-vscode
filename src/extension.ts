@@ -20,12 +20,14 @@ import {
 } from "./contracts";
 import {
   commandFailureMessage,
+  ElyroCancellationError,
   ElyroClient,
   ElyroCommandError,
 } from "./elyroClient";
-import { humanize, presentWorkspace } from "./presentation";
+import { humanize, presentDoctor, presentWorkspace } from "./presentation";
 import {
   projectActions,
+  shouldExpandProject,
   shouldShowGlobalSetup,
   summarizeProject,
   type ProjectAction,
@@ -60,7 +62,10 @@ class ElyroProjectsProvider
   >();
   readonly onDidChangeTreeData = this.changeEmitter.event;
 
-  constructor(private readonly getProjects: () => readonly ProjectEntry[]) {}
+  constructor(
+    private readonly getProjects: () => readonly ProjectEntry[],
+    private readonly getSelectedFolderUri: () => string | undefined,
+  ) {}
 
   refresh(): void {
     this.changeEmitter.fire();
@@ -76,7 +81,18 @@ class ElyroProjectsProvider
       if (shouldShowGlobalSetup(projects.map((entry) => entry.snapshot))) {
         return [new SetupTreeItem(projects[0]!)];
       }
-      return projects.map((entry) => new ProjectTreeItem(entry));
+      const selectedFolderUri = this.getSelectedFolderUri();
+      return projects.map(
+        (entry) =>
+          new ProjectTreeItem(
+            entry,
+            shouldExpandProject(
+              entry.snapshot,
+              projects.length,
+              entry.folder.uri.toString() === selectedFolderUri,
+            ),
+          ),
+      );
     }
     if (element instanceof ActionTreeItem) {
       return [];
@@ -112,9 +128,17 @@ class SetupTreeItem extends vscode.TreeItem {
 }
 
 class ProjectTreeItem extends vscode.TreeItem {
-  constructor(readonly entry: ProjectEntry) {
+  constructor(
+    readonly entry: ProjectEntry,
+    expanded: boolean,
+  ) {
     const summary = summarizeProject(entry.snapshot);
-    super(entry.folder.name, vscode.TreeItemCollapsibleState.Expanded);
+    super(
+      entry.folder.name,
+      expanded
+        ? vscode.TreeItemCollapsibleState.Expanded
+        : vscode.TreeItemCollapsibleState.Collapsed,
+    );
     this.id = `elyro.project:${entry.folder.uri.toString()}`;
     this.description = summary.label;
     this.contextValue = summary.contextValue;
@@ -125,13 +149,8 @@ class ProjectTreeItem extends vscode.TreeItem {
         : undefined,
     );
     this.tooltip = new vscode.MarkdownString(
-      `**${entry.folder.name}**  \n${summary.detail}  \n\nSelect for project actions.`,
+      `**${entry.folder.name}**  \n${summary.detail}  \n\nExpand to show project actions.`,
     );
-    this.command = {
-      command: "elyro.openMenu",
-      title: "Manage Elyro Project",
-      arguments: [entry.folder.uri],
-    };
     this.accessibilityInformation = {
       label: `${entry.folder.name}, ${summary.label}`,
     };
@@ -167,6 +186,7 @@ class ElyroController implements vscode.Disposable {
   );
   private readonly projectsProvider = new ElyroProjectsProvider(
     () => this.projects,
+    () => this.focusedFolderUri(),
   );
   private readonly projectsView = vscode.window.createTreeView(
     "elyro.projects",
@@ -239,8 +259,15 @@ class ElyroController implements vscode.Disposable {
                 ? selected.folder
                 : undefined;
         if (folder) {
-          this.selectedFolderUri = folder.uri.toString();
+          const folderUri = folder.uri.toString();
+          const shouldRefreshTree =
+            selected instanceof ProjectTreeItem &&
+            this.selectedFolderUri !== folderUri;
+          this.selectedFolderUri = folderUri;
           this.updateStatusBar(folder);
+          if (shouldRefreshTree) {
+            this.projectsProvider.refresh();
+          }
         }
       }),
       this.output,
@@ -431,19 +458,19 @@ class ElyroController implements vscode.Disposable {
     target?: unknown,
   ): Promise<void> {
     const folder = await this.requireTrustedProjectFolder(target);
-    await this.withBusy(folder, async () => {
-      await this.assertCompatibleVersion(folder.uri.fsPath);
-      const planResult = await this.client().runJson(
-        upPlanArgs(folder.uri.fsPath),
-        folder.uri.fsPath,
-        isWorkspacePlan,
-      );
-      ensureSuccess(planResult);
-      const plan = planResult.data;
-      if (!(await this.confirmUpPlan(plan))) {
-        return;
-      }
+    await this.assertCompatibleVersion(folder.uri.fsPath);
+    const planResult = await this.client().runJson(
+      upPlanArgs(folder.uri.fsPath),
+      folder.uri.fsPath,
+      isWorkspacePlan,
+    );
+    ensureSuccess(planResult);
+    const plan = planResult.data;
+    if (!(await this.confirmUpPlan(plan))) {
+      return;
+    }
 
+    await this.withBusy(folder, async () => {
       await this.withProgress(
         `Elyro is ${upProgressVerb(plan.action)} ${folder.name}…`,
         async (token) => {
@@ -463,11 +490,11 @@ class ElyroController implements vscode.Disposable {
           );
         },
       );
-
-      if (openAfterStart) {
-        await this.openWorkspace(folder);
-      }
     });
+
+    if (openAfterStart) {
+      await this.openWorkspace(folder);
+    }
   }
 
   private async openWorkspace(
@@ -509,22 +536,20 @@ class ElyroController implements vscode.Disposable {
         return result.data;
       },
     );
+    void this.refreshProjects();
     await this.showDoctorReport(report);
   }
 
   private async showDoctorReport(report: DoctorPayload): Promise<void> {
+    const presentation = presentDoctor(report);
     const items = report.checks.map((check) => ({
       label: `${doctorIcon(check.status)} ${humanize(check.name)}`,
       description: humanize(check.scope),
       detail: check.message,
     }));
     await vscode.window.showQuickPick(items, {
-      title: report.healthy
-        ? "Elyro Doctor · Ready"
-        : "Elyro Doctor · Attention needed",
-      placeHolder: report.healthy
-        ? "All required checks passed"
-        : "Review checks that need attention",
+      title: presentation.title,
+      placeHolder: presentation.summary,
       matchOnDescription: true,
       matchOnDetail: true,
     });
@@ -799,7 +824,19 @@ class ElyroController implements vscode.Disposable {
     );
   }
 
+  private focusedFolderUri(): string | undefined {
+    const activeUri = vscode.window.activeTextEditor?.document.uri;
+    const activeFolder = activeUri
+      ? vscode.workspace.getWorkspaceFolder(activeUri)
+      : undefined;
+    return activeFolder?.uri.toString() ?? this.selectedFolderUri;
+  }
+
   private async presentError(error: unknown): Promise<void> {
+    if (error instanceof ElyroCancellationError) {
+      this.output.info("Elyro command cancelled by the user.");
+      return;
+    }
     const detail = errorMessage(error);
     this.output.error(detail);
     const action = await vscode.window.showErrorMessage(

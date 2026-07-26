@@ -3,6 +3,7 @@ import test from "node:test";
 import type { WorkspaceView } from "../contracts";
 import {
   projectActions,
+  shouldExpandProject,
   shouldShowGlobalSetup,
   summarizeProject,
   type ProjectSnapshot,
@@ -81,6 +82,16 @@ test("collapses a machine-level Elyro setup state across projects", () => {
   assert.equal(shouldShowGlobalSetup([setup, setup]), true);
   assert.equal(shouldShowGlobalSetup([setup, { phase: "attention" }]), false);
   assert.equal(shouldShowGlobalSetup([]), false);
+});
+
+test("keeps multi-root projects compact while surfacing the active lifecycle", () => {
+  const idle = readyWorkspace("absent");
+  const running = readyWorkspace("running");
+
+  assert.equal(shouldExpandProject(idle, 1, false), true);
+  assert.equal(shouldExpandProject(idle, 3, false), false);
+  assert.equal(shouldExpandProject(idle, 3, true), true);
+  assert.equal(shouldExpandProject(running, 3, false), true);
 });
 
 function readyWorkspace(status: string): ProjectSnapshot {
