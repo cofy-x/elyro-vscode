@@ -382,7 +382,7 @@ class ElyroController implements vscode.Disposable {
 
   private async showStatus(target?: unknown): Promise<void> {
     const folder = await this.requireProjectFolder(target);
-    await this.withProgress(
+    const workspace = await this.withProgress(
       `Reading ${folder.name} Workspace status…`,
       async (token) => {
         const result = await this.client().runJson(
@@ -396,32 +396,32 @@ class ElyroController implements vscode.Disposable {
           phase: "ready",
           workspace: result.data.workspace,
         });
-        const workspace = result.data.workspace;
-        const presentation = presentWorkspace(workspace);
-        await vscode.window.showQuickPick(
-          [
-            {
-              label: `$(${presentation.icon}) ${presentation.label}`,
-              detail: presentation.detail,
-            },
-            { label: "$(folder) Project", description: workspace.project_dir },
-            {
-              label: "$(remote) Linux mount",
-              description: workspace.mount_dir,
-            },
-            {
-              label: "$(radio-tower) Published ports",
-              description:
-                workspace.published_ports.length > 0
-                  ? workspace.published_ports.join(", ")
-                  : "None",
-            },
-          ],
-          {
-            title: `Elyro · ${workspace.name}`,
-            placeHolder: "Workspace details",
-          },
-        );
+        return result.data.workspace;
+      },
+    );
+    const presentation = presentWorkspace(workspace);
+    await vscode.window.showQuickPick(
+      [
+        {
+          label: `$(${presentation.icon}) ${presentation.label}`,
+          detail: presentation.detail,
+        },
+        { label: "$(folder) Project", description: workspace.project_dir },
+        {
+          label: "$(remote) Linux mount",
+          description: workspace.mount_dir,
+        },
+        {
+          label: "$(radio-tower) Published ports",
+          description:
+            workspace.published_ports.length > 0
+              ? workspace.published_ports.join(", ")
+              : "None",
+        },
+      ],
+      {
+        title: `Elyro · ${workspace.name}`,
+        placeHolder: "Workspace details",
       },
     );
   }
@@ -497,7 +497,7 @@ class ElyroController implements vscode.Disposable {
 
   private async runDoctor(target?: unknown): Promise<void> {
     const folder = await this.requireProjectFolder(target);
-    await this.withProgress(
+    const report = await this.withProgress(
       `Running Elyro Doctor for ${folder.name}…`,
       async (token) => {
         const result = await this.client().runJson(
@@ -506,9 +506,10 @@ class ElyroController implements vscode.Disposable {
           isDoctorPayload,
           token,
         );
-        await this.showDoctorReport(result.data);
+        return result.data;
       },
     );
+    await this.showDoctorReport(report);
   }
 
   private async showDoctorReport(report: DoctorPayload): Promise<void> {

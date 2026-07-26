@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2
+
+- Close progress notifications as soon as Doctor and Workspace Details finish loading, without waiting for their result panels to be dismissed.
+
 ## 0.1.1
 
 - Add a compact Elyro Activity Bar and native Projects view for managing every folder in the current editor window.
