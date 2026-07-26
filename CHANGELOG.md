@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.1
+
+- Add a compact Elyro Activity Bar and native Projects view for managing every folder in the current editor window.
+- Add project action rows and contextual buttons for start, open, shell, details, Doctor, and confirmed stop.
+- Keep inactive, unconfigured, and unavailable projects neutral; show the status item only for a running active project.
+- Simplify the Elyro extension icon with a white background and add a matching theme-aware Activity Bar mark.
+
 ## 0.1.0
 
 - Add a native Elyro Workspace menu and project status bar item.

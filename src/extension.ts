@@ -17,7 +17,6 @@ import {
   isWorkspacePlan,
   type DoctorPayload,
   type WorkspacePlan,
-  type WorkspaceView,
 } from "./contracts";
 import {
   commandFailureMessage,
@@ -25,18 +24,138 @@ import {
   ElyroCommandError,
 } from "./elyroClient";
 import { humanize, presentWorkspace } from "./presentation";
+import {
+  projectActions,
+  shouldShowGlobalSetup,
+  summarizeProject,
+  type ProjectAction,
+  type ProjectSnapshot,
+} from "./sidebar";
 import { compareVersions } from "./version";
 
 const minimumElyroVersion = "0.1.5";
+const documentationUrl = "https://github.com/cofy-x/elyro#installation";
 
 export function activate(context: vscode.ExtensionContext): void {
   const controller = new ElyroController();
   context.subscriptions.push(controller);
   controller.register();
-  void controller.refresh(true);
+  void controller.refreshProjects();
 }
 
 export function deactivate(): void {}
+
+interface ProjectEntry {
+  folder: vscode.WorkspaceFolder;
+  snapshot: ProjectSnapshot;
+}
+
+type ProjectTreeNode = ProjectTreeItem | SetupTreeItem | ActionTreeItem;
+
+class ElyroProjectsProvider
+  implements vscode.TreeDataProvider<ProjectTreeNode>, vscode.Disposable
+{
+  private readonly changeEmitter = new vscode.EventEmitter<
+    ProjectTreeNode | undefined | null | void
+  >();
+  readonly onDidChangeTreeData = this.changeEmitter.event;
+
+  constructor(private readonly getProjects: () => readonly ProjectEntry[]) {}
+
+  refresh(): void {
+    this.changeEmitter.fire();
+  }
+
+  getTreeItem(element: ProjectTreeNode): vscode.TreeItem {
+    return element;
+  }
+
+  getChildren(element?: ProjectTreeNode): ProjectTreeNode[] {
+    if (!element) {
+      const projects = this.getProjects();
+      if (shouldShowGlobalSetup(projects.map((entry) => entry.snapshot))) {
+        return [new SetupTreeItem(projects[0]!)];
+      }
+      return projects.map((entry) => new ProjectTreeItem(entry));
+    }
+    if (element instanceof ActionTreeItem) {
+      return [];
+    }
+    if (element instanceof SetupTreeItem) {
+      return projectActions(element.entry.snapshot).map(
+        (descriptor) => new ActionTreeItem(element.entry.folder, descriptor),
+      );
+    }
+    return projectActions(element.entry.snapshot).map(
+      (descriptor) => new ActionTreeItem(element.entry.folder, descriptor),
+    );
+  }
+
+  dispose(): void {
+    this.changeEmitter.dispose();
+  }
+}
+
+class SetupTreeItem extends vscode.TreeItem {
+  constructor(readonly entry: ProjectEntry) {
+    super("Set up Elyro", vscode.TreeItemCollapsibleState.Expanded);
+    this.id = "elyro.environment.setup";
+    this.contextValue = "elyro.environment.setup";
+    this.iconPath = new vscode.ThemeIcon("circle-outline");
+    this.tooltip = entry.snapshot.message ?? "Install or update the Elyro CLI";
+    this.command = {
+      command: "elyro.openDocumentation",
+      title: "Get Elyro",
+    };
+    this.accessibilityInformation = { label: "Set up Elyro" };
+  }
+}
+
+class ProjectTreeItem extends vscode.TreeItem {
+  constructor(readonly entry: ProjectEntry) {
+    const summary = summarizeProject(entry.snapshot);
+    super(entry.folder.name, vscode.TreeItemCollapsibleState.Expanded);
+    this.id = `elyro.project:${entry.folder.uri.toString()}`;
+    this.description = summary.label;
+    this.contextValue = summary.contextValue;
+    this.iconPath = new vscode.ThemeIcon(
+      summary.icon,
+      entry.snapshot.workspace?.status === "running"
+        ? new vscode.ThemeColor("testing.iconPassed")
+        : undefined,
+    );
+    this.tooltip = new vscode.MarkdownString(
+      `**${entry.folder.name}**  \n${summary.detail}  \n\nSelect for project actions.`,
+    );
+    this.command = {
+      command: "elyro.openMenu",
+      title: "Manage Elyro Project",
+      arguments: [entry.folder.uri],
+    };
+    this.accessibilityInformation = {
+      label: `${entry.folder.name}, ${summary.label}`,
+    };
+  }
+}
+
+class ActionTreeItem extends vscode.TreeItem {
+  constructor(
+    readonly folder: vscode.WorkspaceFolder,
+    descriptor: ProjectAction,
+  ) {
+    super(descriptor.label, vscode.TreeItemCollapsibleState.None);
+    this.id = `${folder.uri.toString()}:${descriptor.command}`;
+    this.contextValue = "elyro.action";
+    this.iconPath = new vscode.ThemeIcon(descriptor.icon);
+    this.command = {
+      command: descriptor.command,
+      title: descriptor.label,
+      arguments: [folder.uri],
+    };
+    this.tooltip = descriptor.description;
+    this.accessibilityInformation = { label: descriptor.label };
+  }
+}
 
 class ElyroController implements vscode.Disposable {
   private readonly output = vscode.window.createOutputChannel("Elyro", {
@@ -46,187 +165,225 @@ class ElyroController implements vscode.Disposable {
     vscode.StatusBarAlignment.Left,
     30,
   );
+  private readonly projectsProvider = new ElyroProjectsProvider(
+    () => this.projects,
+  );
+  private readonly projectsView = vscode.window.createTreeView(
+    "elyro.projects",
+    {
+      treeDataProvider: this.projectsProvider,
+      showCollapseAll: false,
+    },
+  );
   private readonly disposables: vscode.Disposable[] = [];
-  private currentWorkspace: WorkspaceView | undefined;
+  private projects: ProjectEntry[] = [];
   private selectedFolderUri: string | undefined;
+  private refreshGeneration = 0;
   private busy = false;
 
   constructor() {
-    this.statusBar.command = "elyro.openMenu";
     this.statusBar.name = "Elyro Workspace";
-    this.setIdleStatus("Loading…", "Elyro is checking this project");
-    this.statusBar.show();
+    this.statusBar.hide();
+    this.projectsView.description = "Local Linux workspaces";
   }
 
   register(): void {
-    const commands: Record<string, () => Promise<void> | void> = {
-      "elyro.openMenu": async () => this.openMenu(),
-      "elyro.showStatus": async () => this.showStatus(),
-      "elyro.start": async () => this.start(false),
-      "elyro.startAndOpen": async () => this.start(true),
-      "elyro.open": async () => this.openWorkspace(),
-      "elyro.openShell": async () => this.openShell(),
-      "elyro.runDoctor": async () => this.runDoctor(),
-      "elyro.stop": async () => this.stop(),
-      "elyro.refresh": async () => this.refresh(false),
-      "elyro.showOutput": () => {
-        this.output.show(true);
-      },
-    };
+    const commands: Record<string, (target?: unknown) => Promise<void> | void> =
+      {
+        "elyro.openMenu": async (target) => this.openMenu(target),
+        "elyro.showStatus": async (target) => this.showStatus(target),
+        "elyro.start": async (target) => this.start(false, target),
+        "elyro.startAndOpen": async (target) => this.start(true, target),
+        "elyro.open": async (target) => this.openWorkspace(undefined, target),
+        "elyro.openShell": async (target) => this.openShell(target),
+        "elyro.runDoctor": async (target) => this.runDoctor(target),
+        "elyro.stop": async (target) => this.stop(target),
+        "elyro.refresh": async () => this.refreshProjects(),
+        "elyro.showOutput": () => this.output.show(true),
+        "elyro.openDocumentation": async () => {
+          await vscode.env.openExternal(vscode.Uri.parse(documentationUrl));
+        },
+      };
 
     for (const [command, handler] of Object.entries(commands)) {
       this.disposables.push(
-        vscode.commands.registerCommand(command, async () => {
+        vscode.commands.registerCommand(command, async (target?: unknown) => {
           try {
-            await handler();
+            await handler(target);
           } catch (error) {
             await this.presentError(error);
           }
         }),
       );
     }
+
     this.disposables.push(
       vscode.workspace.onDidChangeWorkspaceFolders(() => {
         this.selectedFolderUri = undefined;
-        void this.refresh(true);
+        void this.refreshProjects();
       }),
       vscode.workspace.onDidChangeConfiguration((event) => {
         if (event.affectsConfiguration("elyro.executablePath")) {
-          void this.refresh(true);
+          void this.refreshProjects();
         }
       }),
-      vscode.window.onDidChangeActiveTextEditor(() => void this.refresh(true)),
+      vscode.window.onDidChangeActiveTextEditor(() => this.updateStatusBar()),
+      this.projectsView.onDidChangeSelection((event) => {
+        const selected = event.selection[0];
+        const folder =
+          selected instanceof ProjectTreeItem
+            ? selected.entry.folder
+            : selected instanceof SetupTreeItem
+              ? selected.entry.folder
+              : selected instanceof ActionTreeItem
+                ? selected.folder
+                : undefined;
+        if (folder) {
+          this.selectedFolderUri = folder.uri.toString();
+          this.updateStatusBar(folder);
+        }
+      }),
+      this.output,
+      this.statusBar,
+      this.projectsProvider,
+      this.projectsView,
     );
-    this.disposables.push(this.output, this.statusBar);
   }
 
-  async refresh(silent: boolean): Promise<void> {
+  async refreshProjects(): Promise<void> {
     if (this.busy) {
       return;
     }
-    if (process.platform !== "darwin") {
-      this.currentWorkspace = undefined;
-      this.setWarningStatus(
-        "macOS required",
-        "Elyro currently supports macOS hosts",
-      );
-      return;
-    }
-    const folder = await this.resolveProjectFolder(silent);
-    if (!folder) {
-      this.currentWorkspace = undefined;
-      this.setIdleStatus("Open a folder", "Open a project folder to use Elyro");
+    const generation = ++this.refreshGeneration;
+
+    const folders = vscode.workspace.workspaceFolders ?? [];
+    void vscode.commands.executeCommand(
+      "setContext",
+      "elyro.hasWorkspaceFolders",
+      folders.length > 0,
+    );
+    if (folders.length === 0) {
+      this.projects = [];
+      this.projectsProvider.refresh();
+      this.statusBar.hide();
       return;
     }
 
-    try {
-      const result = await this.client().runJson(
-        statusArgs(folder.uri.fsPath),
-        folder.uri.fsPath,
-        isWorkspacePayload,
+    this.projects = folders.map((folder) => ({
+      folder,
+      snapshot: { phase: "loading" },
+    }));
+    this.projectsProvider.refresh();
+
+    if (process.platform !== "darwin") {
+      this.setAllProjectsToSetup(
+        "Elyro currently manages projects from a macOS host.",
       );
-      if (result.exitCode !== 0) {
-        throw new ElyroCommandError(commandFailureMessage(result), result);
-      }
-      this.currentWorkspace = result.data.workspace;
-      this.updateStatusBar(result.data.workspace);
-      if (!silent) {
-        void vscode.window.showInformationMessage(
-          `Elyro: ${presentWorkspace(result.data.workspace).label}`,
+      return;
+    }
+
+    const cwd = folders[0]!.uri.fsPath;
+    try {
+      const versionResult = await this.client().runJson(
+        versionArgs(),
+        cwd,
+        isVersionPayload,
+      );
+      ensureSuccess(versionResult);
+      const version = versionResult.data.version.replace(/^v/, "");
+      if (compareVersions(version, minimumElyroVersion) < 0) {
+        if (generation !== this.refreshGeneration) {
+          return;
+        }
+        this.setAllProjectsToSetup(
+          `Update Elyro ${versionResult.data.version} to ${minimumElyroVersion} or newer.`,
         );
+        return;
       }
     } catch (error) {
-      this.currentWorkspace = undefined;
-      this.setErrorStatus("Unavailable", errorMessage(error));
-      if (!silent) {
-        throw error;
+      if (generation !== this.refreshGeneration) {
+        return;
       }
+      this.output.warn(errorMessage(error));
+      this.setAllProjectsToSetup("Install Elyro to manage Linux workspaces.");
+      return;
     }
+
+    const projects = await Promise.all(
+      folders.map(async (folder): Promise<ProjectEntry> => {
+        try {
+          const result = await this.client().runJson(
+            statusArgs(folder.uri.fsPath),
+            folder.uri.fsPath,
+            isWorkspacePayload,
+          );
+          ensureSuccess(result);
+          return {
+            folder,
+            snapshot: { phase: "ready", workspace: result.data.workspace },
+          };
+        } catch (error) {
+          this.output.warn(`${folder.name}: ${errorMessage(error)}`);
+          return {
+            folder,
+            snapshot: {
+              phase: "attention",
+              message: "Run Doctor for guided setup checks.",
+            },
+          };
+        }
+      }),
+    );
+    if (generation !== this.refreshGeneration) {
+      return;
+    }
+    this.projects = projects;
+    this.projectsProvider.refresh();
+    this.updateStatusBar();
   }
 
-  private async openMenu(): Promise<void> {
-    const folder = await this.requireProjectFolder();
-    await this.refresh(true);
-    const presentation = this.currentWorkspace
-      ? presentWorkspace(this.currentWorkspace)
-      : undefined;
+  private setAllProjectsToSetup(message: string): void {
+    this.projects = this.projects.map(({ folder }) => ({
+      folder,
+      snapshot: { phase: "setup", message },
+    }));
+    this.projectsProvider.refresh();
+    this.statusBar.hide();
+  }
+
+  private async openMenu(target?: unknown): Promise<void> {
+    const folder = await this.requireProjectFolder(target);
+    const entry = this.entryFor(folder);
+    const summary = summarizeProject(entry?.snapshot ?? { phase: "loading" });
+    const actions = projectActions(entry?.snapshot ?? { phase: "loading" });
     const items: ElyroQuickPickItem[] = [
       {
-        label: presentation
-          ? `$(${presentation.icon}) ${presentation.label}`
-          : "$(warning) Elyro unavailable",
+        label: `$(${summary.icon}) ${summary.label}`,
         description: folder.name,
-        detail: presentation?.detail ?? "Open output for diagnostic details",
-        command: "elyro.showStatus",
+        detail: summary.detail,
       },
       { label: "", kind: vscode.QuickPickItemKind.Separator },
+      ...actions.map((descriptor) => ({
+        label: `$(${descriptor.icon}) ${descriptor.label}`,
+        detail: descriptor.description,
+        command: descriptor.command,
+      })),
     ];
-
-    if (this.currentWorkspace?.status === "running") {
-      items.push(
-        action(
-          "$(link-external) Open Workspace",
-          "Open this project through Elyro",
-          "elyro.open",
-        ),
-        action(
-          "$(terminal) Open Shell",
-          "Start an integrated Linux shell",
-          "elyro.openShell",
-        ),
-      );
-    } else {
-      items.push(
-        action(
-          "$(remote-explorer) Start and Open Workspace",
-          "Prepare Linux and continue in this editor",
-          "elyro.startAndOpen",
-        ),
-        action(
-          "$(play) Start Workspace",
-          "Prepare Linux without opening a new window",
-          "elyro.start",
-        ),
-      );
-    }
-    items.push(
-      action(
-        "$(stethoscope) Run Doctor",
-        "Check Elyro, Docker, SSH, and this project",
-        "elyro.runDoctor",
-      ),
-      action(
-        "$(refresh) Refresh",
-        "Read the current Workspace status",
-        "elyro.refresh",
-      ),
-    );
-    if (this.currentWorkspace?.status === "running") {
-      items.push(
-        { label: "", kind: vscode.QuickPickItemKind.Separator },
-        action(
-          "$(stop-circle) Stop Workspace…",
-          "Remove managed runtime state",
-          "elyro.stop",
-        ),
-      );
-    }
-
     const picked = await vscode.window.showQuickPick(items, {
-      title: "Elyro",
-      placeHolder: "Choose what to do with this Linux Workspace",
+      title: `Elyro · ${folder.name}`,
+      placeHolder: "Manage this Linux Workspace",
       matchOnDescription: true,
       matchOnDetail: true,
     });
     if (picked?.command) {
-      await vscode.commands.executeCommand(picked.command);
+      await vscode.commands.executeCommand(picked.command, folder.uri);
     }
   }
 
-  private async showStatus(): Promise<void> {
-    const folder = await this.requireProjectFolder();
+  private async showStatus(target?: unknown): Promise<void> {
+    const folder = await this.requireProjectFolder(target);
     await this.withProgress(
-      "Reading Elyro Workspace status…",
+      `Reading ${folder.name} Workspace status…`,
       async (token) => {
         const result = await this.client().runJson(
           statusArgs(folder.uri.fsPath),
@@ -235,8 +392,10 @@ class ElyroController implements vscode.Disposable {
           token,
         );
         ensureSuccess(result);
-        this.currentWorkspace = result.data.workspace;
-        this.updateStatusBar(result.data.workspace);
+        this.updateProject(folder, {
+          phase: "ready",
+          workspace: result.data.workspace,
+        });
         const workspace = result.data.workspace;
         const presentation = presentWorkspace(workspace);
         await vscode.window.showQuickPick(
@@ -267,9 +426,12 @@ class ElyroController implements vscode.Disposable {
     );
   }
 
-  private async start(openAfterStart: boolean): Promise<void> {
-    const folder = await this.requireTrustedProjectFolder();
-    await this.withBusy(async () => {
+  private async start(
+    openAfterStart: boolean,
+    target?: unknown,
+  ): Promise<void> {
+    const folder = await this.requireTrustedProjectFolder(target);
+    await this.withBusy(folder, async () => {
       await this.assertCompatibleVersion(folder.uri.fsPath);
       const planResult = await this.client().runJson(
         upPlanArgs(folder.uri.fsPath),
@@ -283,7 +445,7 @@ class ElyroController implements vscode.Disposable {
       }
 
       await this.withProgress(
-        `Elyro is ${upProgressVerb(plan.action)} the Workspace…`,
+        `Elyro is ${upProgressVerb(plan.action)} ${folder.name}…`,
         async (token) => {
           const result = await this.client().runJson(
             upArgs(folder.uri.fsPath),
@@ -292,8 +454,10 @@ class ElyroController implements vscode.Disposable {
             token,
           );
           ensureSuccess(result);
-          this.currentWorkspace = result.data.workspace;
-          this.updateStatusBar(result.data.workspace);
+          this.updateProject(folder, {
+            phase: "ready",
+            workspace: result.data.workspace,
+          });
           void vscode.window.showInformationMessage(
             `Elyro Workspace ${humanize(result.data.action ?? "ready").toLowerCase()} in ${formatDuration(result.data.duration_ms)}.`,
           );
@@ -306,18 +470,20 @@ class ElyroController implements vscode.Disposable {
     });
   }
 
-  private async openWorkspace(folder?: vscode.WorkspaceFolder): Promise<void> {
-    const project = folder ?? (await this.requireTrustedProjectFolder());
-    const editor = detectEditor();
+  private async openWorkspace(
+    folder?: vscode.WorkspaceFolder,
+    target?: unknown,
+  ): Promise<void> {
+    const project = folder ?? (await this.requireTrustedProjectFolder(target));
     const result = await this.client().run(
-      openArgs(project.uri.fsPath, editor),
+      openArgs(project.uri.fsPath, detectEditor()),
       project.uri.fsPath,
     );
     ensureSuccess(result);
   }
 
-  private async openShell(): Promise<void> {
-    const folder = await this.requireTrustedProjectFolder();
+  private async openShell(target?: unknown): Promise<void> {
+    const folder = await this.requireTrustedProjectFolder(target);
     const terminal = vscode.window.createTerminal({
       name: `Elyro · ${folder.name}`,
       iconPath: new vscode.ThemeIcon("terminal-linux"),
@@ -329,17 +495,20 @@ class ElyroController implements vscode.Disposable {
     terminal.show();
   }
 
-  private async runDoctor(): Promise<void> {
-    const folder = await this.requireProjectFolder();
-    await this.withProgress("Running Elyro Doctor…", async (token) => {
-      const result = await this.client().runJson(
-        doctorArgs(folder.uri.fsPath),
-        folder.uri.fsPath,
-        isDoctorPayload,
-        token,
-      );
-      await this.showDoctorReport(result.data);
-    });
+  private async runDoctor(target?: unknown): Promise<void> {
+    const folder = await this.requireProjectFolder(target);
+    await this.withProgress(
+      `Running Elyro Doctor for ${folder.name}…`,
+      async (token) => {
+        const result = await this.client().runJson(
+          doctorArgs(folder.uri.fsPath),
+          folder.uri.fsPath,
+          isDoctorPayload,
+          token,
+        );
+        await this.showDoctorReport(result.data);
+      },
+    );
   }
 
   private async showDoctorReport(report: DoctorPayload): Promise<void> {
@@ -360,8 +529,8 @@ class ElyroController implements vscode.Disposable {
     });
   }
 
-  private async stop(): Promise<void> {
-    const folder = await this.requireTrustedProjectFolder();
+  private async stop(target?: unknown): Promise<void> {
+    const folder = await this.requireTrustedProjectFolder(target);
     const planResult = await this.client().runJson(
       downPlanArgs(folder.uri.fsPath),
       folder.uri.fsPath,
@@ -373,7 +542,7 @@ class ElyroController implements vscode.Disposable {
       void vscode.window.showInformationMessage(
         "Elyro Workspace is already absent.",
       );
-      await this.refresh(true);
+      await this.refreshProjects();
       return;
     }
     const removes =
@@ -387,21 +556,26 @@ class ElyroController implements vscode.Disposable {
       return;
     }
 
-    await this.withBusy(async () => {
-      await this.withProgress("Stopping Elyro Workspace…", async (token) => {
-        const result = await this.client().runJson(
-          downArgs(folder.uri.fsPath),
-          folder.uri.fsPath,
-          isWorkspacePayload,
-          token,
-        );
-        ensureSuccess(result);
-        this.currentWorkspace = result.data.workspace;
-        this.updateStatusBar(result.data.workspace);
-        void vscode.window.showInformationMessage(
-          "Elyro Workspace stopped. Project files were preserved.",
-        );
-      });
+    await this.withBusy(folder, async () => {
+      await this.withProgress(
+        `Stopping ${folder.name} Workspace…`,
+        async (token) => {
+          const result = await this.client().runJson(
+            downArgs(folder.uri.fsPath),
+            folder.uri.fsPath,
+            isWorkspacePayload,
+            token,
+          );
+          ensureSuccess(result);
+          this.updateProject(folder, {
+            phase: "ready",
+            workspace: result.data.workspace,
+          });
+          void vscode.window.showInformationMessage(
+            "Elyro Workspace stopped. Project files were preserved.",
+          );
+        },
+      );
     });
   }
 
@@ -442,28 +616,55 @@ class ElyroController implements vscode.Disposable {
     }
   }
 
-  private async requireProjectFolder(): Promise<vscode.WorkspaceFolder> {
-    const folder = await this.resolveProjectFolder(false);
+  private async requireProjectFolder(
+    target?: unknown,
+  ): Promise<vscode.WorkspaceFolder> {
+    const folder = await this.resolveProjectFolder(false, target);
     if (!folder) {
       throw new Error("Open a project folder to use Elyro.");
     }
     return folder;
   }
 
-  private async requireTrustedProjectFolder(): Promise<vscode.WorkspaceFolder> {
+  private async requireTrustedProjectFolder(
+    target?: unknown,
+  ): Promise<vscode.WorkspaceFolder> {
     if (!vscode.workspace.isTrusted) {
       throw new Error("Trust this workspace before running Elyro commands.");
     }
-    return await this.requireProjectFolder();
+    return await this.requireProjectFolder(target);
   }
 
   private async resolveProjectFolder(
     silent: boolean,
+    target?: unknown,
   ): Promise<vscode.WorkspaceFolder | undefined> {
     const folders = vscode.workspace.workspaceFolders;
     if (!folders || folders.length === 0) {
       return undefined;
     }
+
+    const targetedTreeFolder =
+      target instanceof ProjectTreeItem || target instanceof SetupTreeItem
+        ? target.entry.folder
+        : target instanceof ActionTreeItem
+          ? target.folder
+          : undefined;
+    if (targetedTreeFolder) {
+      this.selectedFolderUri = targetedTreeFolder.uri.toString();
+      return targetedTreeFolder;
+    }
+
+    if (target instanceof vscode.Uri) {
+      const targeted = folders.find(
+        (folder) => folder.uri.toString() === target.toString(),
+      );
+      if (targeted) {
+        this.selectedFolderUri = targeted.uri.toString();
+        return targeted;
+      }
+    }
+
     const activeUri = vscode.window.activeTextEditor?.document.uri;
     if (activeUri) {
       const activeFolder = vscode.workspace.getWorkspaceFolder(activeUri);
@@ -484,10 +685,30 @@ class ElyroController implements vscode.Disposable {
       return folder;
     }
     const folder = await vscode.window.showWorkspaceFolderPick({
-      placeHolder: "Choose the project to use with Elyro",
+      placeHolder: "Choose the project to manage with Elyro",
     });
     this.selectedFolderUri = folder?.uri.toString();
     return folder;
+  }
+
+  private entryFor(folder: vscode.WorkspaceFolder): ProjectEntry | undefined {
+    return this.projects.find(
+      (entry) => entry.folder.uri.toString() === folder.uri.toString(),
+    );
+  }
+
+  private updateProject(
+    folder: vscode.WorkspaceFolder,
+    snapshot: ProjectSnapshot,
+  ): void {
+    const existing = this.entryFor(folder);
+    if (existing) {
+      existing.snapshot = snapshot;
+    } else {
+      this.projects.push({ folder, snapshot });
+    }
+    this.projectsProvider.refresh();
+    this.updateStatusBar(folder);
   }
 
   private client(): ElyroClient {
@@ -519,51 +740,61 @@ class ElyroController implements vscode.Disposable {
     );
   }
 
-  private async withBusy(operation: () => Promise<void>): Promise<void> {
+  private async withBusy(
+    folder: vscode.WorkspaceFolder,
+    operation: () => Promise<void>,
+  ): Promise<void> {
     if (this.busy) {
       throw new Error("Another Elyro operation is already running.");
     }
     this.busy = true;
     this.statusBar.text = "$(sync~spin) Elyro";
+    this.statusBar.tooltip = `Updating ${folder.name}`;
+    this.statusBar.show();
     try {
       await operation();
     } finally {
       this.busy = false;
-      await this.refresh(true);
+      await this.refreshProjects();
     }
   }
 
-  private updateStatusBar(workspace: WorkspaceView): void {
-    const presentation = presentWorkspace(workspace);
-    this.statusBar.text = `$(${presentation.icon}) Elyro: ${presentation.label}`;
+  private updateStatusBar(preferredFolder?: vscode.WorkspaceFolder): void {
+    if (this.busy) {
+      return;
+    }
+    const folder = preferredFolder ?? this.cachedActiveProjectFolder();
+    const entry = folder ? this.entryFor(folder) : undefined;
+    const workspace = entry?.snapshot.workspace;
+    if (!folder || !workspace || workspace.status !== "running") {
+      this.statusBar.hide();
+      return;
+    }
+    this.statusBar.text = "$(vm-active) Elyro";
     this.statusBar.tooltip = new vscode.MarkdownString(
-      `**${workspace.name}**  \n${presentation.detail}  \n\nClick for Workspace actions.`,
+      `**${folder.name}** is running in Linux.  \n\nSelect for project actions.`,
     );
-    this.statusBar.backgroundColor =
-      presentation.tone === "warning"
-        ? new vscode.ThemeColor("statusBarItem.warningBackground")
-        : undefined;
-  }
-
-  private setIdleStatus(label: string, tooltip: string): void {
-    this.statusBar.text = `$(terminal-linux) Elyro: ${label}`;
-    this.statusBar.tooltip = tooltip;
+    this.statusBar.command = {
+      command: "elyro.openMenu",
+      title: "Manage Elyro Project",
+      arguments: [folder.uri],
+    };
     this.statusBar.backgroundColor = undefined;
+    this.statusBar.show();
   }
 
-  private setWarningStatus(label: string, tooltip: string): void {
-    this.statusBar.text = `$(warning) Elyro: ${label}`;
-    this.statusBar.tooltip = tooltip;
-    this.statusBar.backgroundColor = new vscode.ThemeColor(
-      "statusBarItem.warningBackground",
-    );
-  }
-
-  private setErrorStatus(label: string, tooltip: string): void {
-    this.statusBar.text = `$(error) Elyro: ${label}`;
-    this.statusBar.tooltip = tooltip;
-    this.statusBar.backgroundColor = new vscode.ThemeColor(
-      "statusBarItem.errorBackground",
+  private cachedActiveProjectFolder(): vscode.WorkspaceFolder | undefined {
+    const folders = vscode.workspace.workspaceFolders ?? [];
+    const activeUri = vscode.window.activeTextEditor?.document.uri;
+    const activeFolder = activeUri
+      ? vscode.workspace.getWorkspaceFolder(activeUri)
+      : undefined;
+    return (
+      activeFolder ??
+      folders.find(
+        (folder) => folder.uri.toString() === this.selectedFolderUri,
+      ) ??
+      folders[0]
     );
   }
 
@@ -588,14 +819,6 @@ class ElyroController implements vscode.Disposable {
 
 interface ElyroQuickPickItem extends vscode.QuickPickItem {
   command?: string;
-}
-
-function action(
-  label: string,
-  detail: string,
-  command: string,
-): ElyroQuickPickItem {
-  return { label, detail, command };
 }
 
 function ensureSuccess(result: {
@@ -628,23 +851,27 @@ function doctorIcon(status: "ok" | "warn" | "fail"): string {
 function upProgressVerb(action: string): string {
   switch (action) {
     case "create":
-    case "start":
-      return "starting";
+      return "creating";
     case "recreate":
       return "recreating";
+    case "start":
+      return "starting";
+    case "reuse":
+    case "none":
+      return "checking";
     default:
       return "preparing";
   }
 }
 
-function formatDuration(durationMS: number | undefined): string {
-  if (durationMS === undefined) {
+function formatDuration(durationMs?: number): string {
+  if (durationMs === undefined) {
     return "a moment";
   }
-  if (durationMS < 1000) {
-    return `${durationMS} ms`;
+  if (durationMs < 1000) {
+    return `${durationMs} ms`;
   }
-  return `${(durationMS / 1000).toFixed(1)} s`;
+  return `${(durationMs / 1000).toFixed(1)} s`;
 }
 
 function errorMessage(error: unknown): string {

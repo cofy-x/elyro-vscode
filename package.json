@@ -1,8 +1,8 @@
 {
   "name": "elyro",
   "displayName": "Elyro",
-  "description": "Run and inspect Elyro Linux Workspaces from VS Code and Cursor.",
-  "version": "0.1.0",
+  "description": "Manage Elyro Linux Workspaces from VS Code and Cursor.",
+  "version": "0.1.1",
   "publisher": "cofy-x",
   "license": "Apache-2.0",
   "homepage": "https://github.com/cofy-x/elyro-vscode#readme",
@@ -47,6 +47,30 @@
     }
   },
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "elyro",
+          "title": "Elyro",
+          "icon": "media/elyro.svg"
+        }
+      ]
+    },
+    "views": {
+      "elyro": [
+        {
+          "id": "elyro.projects",
+          "name": "Projects"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "elyro.projects",
+        "contents": "Open a project folder to manage its Linux Workspace.\n[Open Folder](command:vscode.openFolder)",
+        "when": "!elyro.hasWorkspaceFolders"
+      }
+    ],
     "commands": [
       {
         "command": "elyro.openMenu",
@@ -88,7 +112,7 @@
         "command": "elyro.runDoctor",
         "title": "Run Doctor",
         "category": "Elyro",
-        "icon": "$(stethoscope)"
+        "icon": "$(pulse)"
       },
       {
         "command": "elyro.stop",
@@ -107,8 +131,65 @@
         "title": "Show Output",
         "category": "Elyro",
         "icon": "$(output)"
+      },
+      {
+        "command": "elyro.openDocumentation",
+        "title": "Open Documentation",
+        "category": "Elyro",
+        "icon": "$(book)"
       }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "elyro.refresh",
+          "when": "view == elyro.projects",
+          "group": "navigation@1"
+        },
+        {
+          "command": "elyro.showOutput",
+          "when": "view == elyro.projects",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "elyro.open",
+          "when": "view == elyro.projects && viewItem == elyro.project.running",
+          "group": "inline@1"
+        },
+        {
+          "command": "elyro.openShell",
+          "when": "view == elyro.projects && viewItem == elyro.project.running",
+          "group": "inline@2"
+        },
+        {
+          "command": "elyro.startAndOpen",
+          "when": "view == elyro.projects && viewItem == elyro.project.idle",
+          "group": "inline@1"
+        },
+        {
+          "command": "elyro.start",
+          "when": "view == elyro.projects && viewItem == elyro.project.idle",
+          "group": "inline@2"
+        },
+        {
+          "command": "elyro.openDocumentation",
+          "when": "view == elyro.projects && viewItem == elyro.project.setup",
+          "group": "inline@1"
+        },
+        {
+          "command": "elyro.openDocumentation",
+          "when": "view == elyro.projects && viewItem == elyro.environment.setup",
+          "group": "inline@1"
+        },
+        {
+          "command": "elyro.runDoctor",
+          "when": "view == elyro.projects && viewItem == elyro.project.attention",
+          "group": "inline@1"
+        }
+      ]
+    },
     "configuration": {
       "title": "Elyro",
       "properties": {
@@ -137,7 +218,10 @@
     "vscode:prepublish": "npm run build"
   },
   "overrides": {
+    "brace-expansion": "5.0.8",
     "diff": "8.0.3",
+    "glob": "13.0.6",
+    "minimatch": "10.2.5",
     "serialize-javascript": "7.0.7"
   },
   "devDependencies": {

@@ -1,5 +1,7 @@
 import { existsSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { downloadAndUnzipVSCode, runTests } from "@vscode/test-electron";
 
@@ -12,9 +14,20 @@ const vscodeExecutablePath =
     ? macOSVSCode
     : await downloadAndUnzipVSCode("1.99.3"));
 
-await runTests({
-  vscodeExecutablePath,
-  extensionDevelopmentPath: root,
-  extensionTestsPath: resolve(root, "out-test/test/suite/index.js"),
-  launchArgs: [root, "--disable-extensions", "--disable-gpu"],
-});
+const testProfile = await mkdtemp(join(tmpdir(), "elyro-vscode-test-"));
+try {
+  await runTests({
+    vscodeExecutablePath,
+    extensionDevelopmentPath: root,
+    extensionTestsPath: resolve(root, "out-test/test/suite/index.js"),
+    launchArgs: [
+      root,
+      "--disable-extensions",
+      "--disable-gpu",
+      `--user-data-dir=${join(testProfile, "user-data")}`,
+      `--extensions-dir=${join(testProfile, "extensions")}`,
+    ],
+  });
+} finally {
+  await rm(testProfile, { force: true, recursive: true });
+}

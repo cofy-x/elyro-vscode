@@ -4,18 +4,19 @@
   <img src="media/icon.png" alt="Elyro" width="112" height="112">
 </p>
 
-Elyro brings a clear, native control surface for [Elyro](https://github.com/cofy-x/elyro) Linux Workspaces into VS Code and Cursor. Edit on macOS, run in Linux, and keep the Elyro CLI as the single source of truth.
+Elyro brings a clear, native project manager for [Elyro](https://github.com/cofy-x/elyro) Linux Workspaces into VS Code and Cursor. Edit on macOS, run in Linux, and keep the Elyro CLI as the single source of truth.
 
 ## What you can do
 
-- See whether the current project's Linux Workspace is running, stopped, or not started.
+- Manage every project in the current editor window from the Elyro Activity Bar.
+- See whether each Linux Workspace is running, stopped, or ready to start.
 - Start a Workspace, then open it in the current editor.
 - Open an integrated Linux shell.
 - Run Elyro Doctor and review every check in a focused native list.
 - Stop a Workspace with an explicit confirmation that project files are preserved.
 - Inspect the exact Elyro commands and diagnostics in the Elyro output channel.
 
-The extension uses VS Code's status bar, Quick Pick, notifications, progress, and integrated terminal. It does not add a custom webview or a second Workspace control plane.
+The extension uses a native Tree View, Quick Pick, notifications, progress, integrated terminals, and one quiet status item that appears only while the active project's Workspace is running. It does not add a custom webview or a second Workspace control plane.
 
 ## Requirements
 
@@ -29,11 +30,11 @@ If Elyro is installed at a custom location, set `elyro.executablePath` in VS Cod
 ## Quick start
 
 1. Open a project folder in VS Code or Cursor.
-2. Select the Elyro status item in the lower-left status bar.
-3. Choose **Start and Open Workspace**.
+2. Open Elyro from the Activity Bar.
+3. Expand the project and choose **Start and Open**.
 4. Use **Open Shell** whenever you want a Linux terminal for the project.
 
-You can also run every action from the Command Palette by entering `Elyro`.
+Projects that have not started Elyro remain neutral: they do not add a warning or red status item. You can also run every action from the Command Palette by entering `Elyro`.
 
 ## Commands
 
@@ -62,7 +63,7 @@ You can also run every action from the Command Palette by entering `Elyro`.
 
 Run **Elyro: Run Doctor** first. If a command fails, choose **Show Output** from the error notification to see the Elyro diagnostic stream.
 
-If the status bar reports that Elyro is unavailable, verify the host installation:
+If the sidebar offers **Get Elyro**, verify the host installation:
 
 ```bash
 elyro version --json

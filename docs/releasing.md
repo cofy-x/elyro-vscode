@@ -5,7 +5,7 @@
 1. Confirm `package.json` and `CHANGELOG.md` use the intended stable version.
 2. Run `npm ci`, `npm audit --audit-level=low`, `npm run check`, `npm run test:integration`, `npm run package`, and `npm run package:verify`.
 3. Install the generated VSIX in clean VS Code and Cursor profiles on macOS.
-4. Exercise status, Doctor, start, open, shell, and confirmed stop against an installed Elyro release.
+4. Exercise the Activity Bar, multi-root project list, quiet inactive-project state, status, Doctor, start, open, shell, and confirmed stop against an installed Elyro release.
 5. Confirm the GitHub Actions CI run for the release commit is green and download its `elyro-vsix` artifact for comparison.
 
 ## Marketplace

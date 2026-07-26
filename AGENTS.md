@@ -23,7 +23,7 @@
 
 ## Change Discipline
 
-- Keep the initial UI native and small: Command Palette, Quick Pick, notifications, output, and at most one status bar item.
+- Keep the UI native and small: one Activity Bar container, one Projects Tree View, Command Palette, Quick Pick, notifications, output, and at most one conditional status bar item.
 - Prefer stable VS Code APIs supported by both VS Code and Cursor; do not use proposed APIs without an explicit product decision.
 - Preserve JSON stdout as machine data and surface stderr as diagnostic output.
 - Add tests for command argv, JSON decoding, workspace identity, cancellation, and error presentation.
