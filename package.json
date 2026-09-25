@@ -227,17 +227,17 @@
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@types/mocha": "10.0.10",
-    "@types/node": "22.20.1",
+    "@types/node": "22.20.4",
     "@types/vscode": "1.99.1",
     "@types/yauzl": "3.4.0",
-    "@vscode/test-electron": "3.0.0",
-    "@vscode/vsce": "3.9.2",
-    "esbuild": "0.28.1",
-    "eslint": "10.7.0",
-    "mocha": "11.7.6",
-    "prettier": "3.9.6",
+    "@vscode/test-electron": "3.1.0",
+    "@vscode/vsce": "4.0.0",
+    "esbuild": "0.28.2",
+    "eslint": "10.11.0",
+    "mocha": "12.0.2",
+    "prettier": "3.9.8",
     "typescript": "6.0.3",
-    "typescript-eslint": "8.65.0",
+    "typescript-eslint": "8.70.1",
     "yauzl": "3.4.0"
   }
 }
